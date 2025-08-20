@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>英語クイズ｜並べ替え＋単語（意味→スペル）</title>
+  <style>
+    :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --border:#1f2937; --accent:#3b82f6; --warn:#ef4444 }
+    *{ box-sizing:border-box }
+    body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif; -webkit-text-size-adjust:100% }
+    header{ position:sticky; top:0; background:rgba(17,24,39,.9); backdrop-filter:saturate(150%) blur(6px); border-bottom:1px solid var(--border); z-index:10 }
+    .container{ max-width:980px; margin:0 auto; padding:16px }
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin:16px 0 }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    .pill{ display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; border:1px solid #334155; background:#0b1220; color:#cbd5e1; font-size:12px }
+    input,select{ background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:12px; padding:8px 10px }
+    button{ border:1px solid #334155; background:#1f2937; color:#e5e7eb; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer }
+    button.primary{ background:var(--accent); border-color:var(--accent); color:white }
+    button.warn{ background:var(--warn); border-color:var(--warn); color:white }
+    button:disabled{ opacity:.5; cursor:not-allowed }
+    .muted{ color:var(--muted) }
+    .right{ margin-left:auto }
+    .kbd{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; border:1px solid #334155; background:#0b1220; border-radius:6px; padding:2px 6px; color:#cbd5e1 }
+    .target{ min-height:52px; padding:8px; background:#0b1220; border:2px dashed var(--accent); border-radius:12px; display:flex; gap:8px; flex-wrap:wrap }
+    .bank{ display:flex; flex-wrap:wrap; gap:8px }
+    .chip{ background:#0b1220; border:1px solid #334155; border-radius:999px; padding:8px 12px; cursor:pointer; transition:.15s; user-select:none; min-height:44px }
+    .chip:hover{ transform:translateY(-1px) }
+    .chip.used{ opacity:.45; cursor:default }
+    .ok{ color:#22c55e } .ng{ color:#ef4444 }
+    .field{ display:flex; gap:8px; align-items:center }
+    .input{ background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:10px; padding:10px 12px; min-width:240px }
+
+    /* iOS Safari フォーカス時の自動ズーム抑止：16px以上に統一 */
+    @supports (-webkit-touch-callout: none) {
+      input, select, textarea { font-size:16px; line-height:1.2; }
+      .input { font-size:16px; }
+      #count { font-size:16px; }
+    }
+    input, select, textarea { min-height:44px; }
+
+    /* --- モバイル最適化 & 操作ボタンの押しやすさ改善 --- */
+    :root{ --tap:44px }
+    body{ touch-action:manipulation }
+    #vocab-input{ width:100% }
+    #target,#bank{ gap:10px }
+    #bank{ max-height:40vh; overflow:auto; padding-bottom:6px }
+
+    /* 操作ボタン配置：解答確認を最優先・大きく */
+    #quiz .actions{ display:flex; flex-wrap:wrap; gap:10px; }
+    #btn-check{ order:1; flex:1 1 100%; padding:14px 18px; font-size:18px; }
+    #btn-next{ order:2; flex:1 1 48%; }
+    #btn-undo, #btn-clear, #btn-speak{ order:3; flex:1 1 30%; min-width:120px }
+    @media (min-width:820px){
+      #btn-check{ flex-basis:60%; font-size:16px; }
+      #btn-next{ flex-basis:auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container row">
+      <div>
+        <h2 style="margin:0">英語クイズ <span class="muted">（並べ替え＋単語）</span></h2>
+        <div class="muted" style="font-size:12px">外部JSON／復習モード／一問一採点／完了時は最小ペイロードをサーバ保存。</div>
+      </div>
+      <div class="right pill" id="user-pill">👤 ゲスト</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 設定 -->
+    <section class="card" id="setup">
+      <div class="row">
+        <label class="row" style="gap:6px"><span class="muted">学習者名</span><input id="learner" type="text" placeholder="taro" autocomplete="off" autocapitalize="off" list="user-suggestions" /></label><datalist id="user-suggestions"></datalist>
+        <label class="row" style="gap:6px"><span class="muted">1セットの出題数</span><input id="count" type="number" min="3" max="20" value="3" style="width:80px"/></label>
+        <label class="row" style="gap:6px"><span class="muted">出題タイプ</span>
+          <select id="qtype">
+            <option value="reorder">並べ替え（文法）</option>
+            <option value="vocab" selected>単語（意味→スペル）</option>
+          </select>
+        </label>
+        <label class="row" style="gap:6px"><span class="muted">サーバ保存URL</span><input id="endpoint" type="text" value="http://192.168.50.122/api/results" placeholder="/api/results" style="min-width:260px"/></label>
+        <button class="primary" id="btn-start">▶ 学習スタート</button>
+        <button id="btn-review" title="間違えた問題だけで出題">🔁 復習（まちがい）</button>
+        <button id="btn-review-recent" title="最近のまちがいを優先">🕘 復習（最近）</button>
+        <button id="btn-weak" title="過去7日の正答率が低い問題">🎯 弱点対策（過去7日）</button>
+      </div>
+      <div class="muted" style="margin-top:8px">
+        並べ替え: <span class="kbd">1-9</span> で選択、<span class="kbd">Backspace</span> で戻す、<span class="kbd">Enter</span> で採点/次へ。<br>
+        単語: 入力欄にスペルを入力（英字・大文字小文字は不問）。
+      </div>
+    </section>
+
+    <!-- クイズ（共通ヘッダ） -->
+    <section class="card" id="quiz" style="display:none">
+      <div class="row">
+        <span class="pill" id="status">Q 1/5</span>
+        <span class="pill">正解: <b id="stat-correct">0</b></span>
+        <span class="pill">誤答: <b id="stat-wrong">0</b></span>
+        <span class="pill right" id="timer">⏱ 00:00</span>
+      </div>
+      <div id="prompt" class="muted">（日本語プロンプト）</div>
+
+      <!-- 並べ替えUI -->
+      <div id="ui-reorder">
+        <div id="target" class="target" aria-label="答えのエリア"></div>
+        <div id="bank" class="bank" aria-label="単語のエリア"></div>
+      </div>
+
+      <!-- 単語UI -->
+      <div id="ui-vocab" style="display:none; margin-top:10px">
+        <div class="field">
+          <input id="vocab-input" class="input" type="text" placeholder="スペルを入力（例: interesting）" autocomplete="off" autocapitalize="off" autocorrect="off" inputmode="latin" />
+          <button id="btn-clear-vocab">🧹 クリア</button>
+        </div>
+        <div class="muted" id="vocab-tip" style="margin-top:6px"></div>
+      </div>
+
+      <div class="row actions" style="margin-top:10px">
+        <button class="primary" id="btn-check">答え合わせ <span class="kbd">Enter</span></button>
+        <button id="btn-next" disabled>次の問題 ▶</button>
+        <button id="btn-undo">↩ ひとつ戻す</button>
+        <button id="btn-clear">🧹 クリア</button>
+        <button id="btn-speak">🔊 正解文/単語</button>
+      </div>
+      <div id="explain" class="muted" style="min-height:1.6em"></div>
+    </section>
+
+    <!-- セット終了 -->
+    <section class="card" id="finished" style="display:none">
+      <h3 style="margin:0 0 8px">セット完了！</h3>
+      <p id="summary" class="muted"></p>
+      <p id="save-status" class="muted">結果送信: 待機中…</p>
+      <div class="row">
+        <button class="primary" id="btn-review-thisset" disabled>❗このセットのまちがいで復習</button>
+        <button class="primary" id="btn-nextset">▶ 次の問題群（次セット）</button>
+        <button id="btn-dashboard">📊 成績を見る</button>
+        <button class="warn right" id="btn-to-setup">設定に戻る</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    /********** 設定 **********/
+    const QUESTIONS_URL = "/data/questions.json"; // Flaskで配信
+    const DEFAULT_ENDPOINT = "http://192.168.50.122/api/results";
+
+    // 設定の記憶用キー
+    const REMEMBER_USER_KEY = 'quiz:lastUser';
+    const REMEMBER_ENDPOINT_KEY = 'quiz:lastEndpoint';
+    const USER_SUGGEST_KEY = 'quiz:userList';
+
+    /********** 問題ロード **********/
+    let BANK_REORDER = [];
+    let BANK_VOCAB = [];
+    async function ensureQuestions(){
+      if (BANK_REORDER.length || BANK_VOCAB.length){ return; }
+      const res = await fetch(QUESTIONS_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error("質問ファイルの読み込みに失敗: " + res.status);
+      const data = await res.json();
+      // 互換: 旧形式 questions は並べ替え扱い
+      BANK_REORDER = (data.questions||data.reorder||[]).map(q=>({type:'reorder', id:q.id||null, unit:q.unit||null, jp:q.jp, en:q.en, chunks:q.chunks, tip:q.tip||''}));
+      BANK_VOCAB   = (data.vocab||[]).map(v=>({type:'vocab', id:v.id||null, unit:v.unit||null, jp:v.jp, en:v.en, tip:v.tip||'', pos:v.pos||''}));
+    }
+
+    /********** 状態 **********/
+    const state = {
+      user:'guest', endpoint: DEFAULT_ENDPOINT,
+      qType:'reorder',
+      totalPerSet:5, order:[], setIndex:0,
+      qIndex:0, correct:0, wrong:0,
+      startedAt:null, seconds:0, timerId:null,
+      answered:[],   // サーバ送信用（最小）
+      graded:false,  // 一問一採点
+      mode:'normal',
+      reviewStrategy:'all', // 'all' | 'recent'
+      weakWindowDays:7,      // 過去◯日を対象
+      missedSetDeck: [],   // このセットで間違えた問題のデッキ
+    };
+
+    const $ = s=>document.querySelector(s);
+    const $$ = s=>Array.from(document.querySelectorAll(s));
+
+    /********** ユーティリティ **********/
+    const fmtTime = s=>{ const m=String(Math.floor(s/60)).padStart(2,'0'); const r=String(s%60).padStart(2,'0'); return `${m}:${r}` };
+    const shuffle = arr=>arr.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+    const NBSP = String.fromCharCode(160);
+    const normalizeSpaces = s=> s.replace(new RegExp(`[${NBSP}\\s]+`,'g'),' ').trim();
+    const normalizeEndPunc = s=> s.replace(/[.,!?]$/,'');
+    const normalizeWord = s=> normalizeSpaces(s).toLowerCase();
+    const nowISO = ()=> new Date().toISOString();
+
+    async function postJSON(url, data, timeoutMs=6000){
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+      try{
+        const res = await fetch(url,{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data), signal: ctrl.signal});
+        clearTimeout(t);
+        return {ok: res.ok, status: res.status};
+      }catch(e){ clearTimeout(t); return {ok:false, error:String(e)}; }
+    }
+
+    async function startSetCustom(customDeck){
+      try{ await ensureQuestions(); }catch(e){ alert(e.message||e); return; }
+      if(!customDeck || !customDeck.length){ alert('このセットの間違いはありません。'); return; }
+
+      // セット初期化
+      state.qIndex=0; state.correct=0; state.wrong=0; state.answered=[]; state.graded=false;
+      $('#stat-correct').textContent='0'; $('#stat-wrong').textContent='0';
+
+      // レビュー用デッキに流し込む（既存ロジック流用）
+      window.__REVIEW_DECK__ = customDeck.map(q=>({ ...q }));
+      state.order = [...window.__REVIEW_DECK__.keys()];
+      state.mode = 'review';
+      // 表示UIを合わせる（並べ替え/単語）
+      state.qType = (window.__REVIEW_DECK__[0]?.type) || state.qType;
+
+      show('quiz'); startTimer(); renderQuestion();
+    }
+
+    /********** 設定の記憶（ユーザー名・送信先） **********/
+    function populateUserSuggestions(){
+      const dl=document.getElementById('user-suggestions'); if(!dl) return;
+      const list=JSON.parse(localStorage.getItem(USER_SUGGEST_KEY)||'[]');
+      dl.innerHTML='';
+      list.forEach(name=>{ const opt=document.createElement('option'); opt.value=name; dl.appendChild(opt); });
+    }
+    function loadRememberedSettings(){
+      const u=(localStorage.getItem(REMEMBER_USER_KEY)||'').trim();
+      if(u){ state.user=u; const inp=document.getElementById('learner'); if(inp) inp.value=u; const pill=document.getElementById('user-pill'); if(pill) pill.textContent=`👤 ${u}`; }
+      const ep=(localStorage.getItem(REMEMBER_ENDPOINT_KEY)||'').trim();
+      if(ep){ state.endpoint=ep; const e=document.getElementById('endpoint'); if(e) e.value=ep; }
+      populateUserSuggestions();
+    }
+    function rememberUserAndEndpoint(){
+      if(state.user) localStorage.setItem(REMEMBER_USER_KEY, state.user);
+      if(state.endpoint) localStorage.setItem(REMEMBER_ENDPOINT_KEY, state.endpoint);
+      const raw=JSON.parse(localStorage.getItem(USER_SUGGEST_KEY)||'[]');
+      const list=Array.isArray(raw)? raw.slice(0) : [];
+      if(state.user){
+        const i=list.indexOf(state.user); if(i!==-1) list.splice(i,1);
+        list.unshift(state.user);
+        if(list.length>20) list.length=20;
+        localStorage.setItem(USER_SUGGEST_KEY, JSON.stringify(list));
+      }
+      populateUserSuggestions();
+    }
+
+    /********** ストレージ（ローカル） **********/
+    const storeKey=(u)=>`quiz:${u}`;
+    const wrongKey=(u,t)=>`quiz:${u}:wrong:${t}`;
+    function getHistory(){ const raw=JSON.parse(localStorage.getItem(storeKey(state.user))||'{}'); return raw.history||[]; }
+    function pushHistory(session){ const raw=JSON.parse(localStorage.getItem(storeKey(state.user))||'{}'); raw.history=raw.history||[]; raw.history.unshift(session); localStorage.setItem(storeKey(state.user), JSON.stringify(raw)); }
+    function getWrongQueue(){ return JSON.parse(localStorage.getItem(wrongKey(state.user, state.qType))||'[]'); }
+    function setWrongQueue(list){ localStorage.setItem(wrongKey(state.user, state.qType), JSON.stringify(list.slice(0,150))); }
+    function addWrongLocal(item){ const q=getWrongQueue(); const key=item.id?`id:${item.id}`:`${item.en}__${item.jp}`; if(!q.some(x=>x.key===key)){ q.unshift({...item, key}); setWrongQueue(q); } }
+    function removeFromWrongIfMatched(rec){ const q=getWrongQueue(); const key=rec.id?`id:${rec.id}`:null; let idx=-1; if(key){ idx=q.findIndex(x=>x.key===key); } if(idx===-1){ idx=q.findIndex(x=>x.en===rec.en && x.jp===rec.jp); } if(idx>-1){ q.splice(idx,1); setWrongQueue(q); } }
+
+    /********** 画面切替 **********/
+    function show(id){ ['setup','quiz','finished'].forEach(sec=>{ const el=$(`#${sec}`); if(!el) return; el.style.display = (sec===id)?'block':'none'; }); }
+
+    /********** デッキ取得 **********/
+    function deck(){ return state.qType==='reorder'? BANK_REORDER : BANK_VOCAB; }
+
+    /********** セット準備 **********/
+    function buildOrderFromBank(){
+      const deckArr = deck();
+      const n = Math.min(state.totalPerSet, deckArr.length);
+
+      // 20日ウィンドウ
+      const WINDOW_DAYS = 20;
+      const WINDOW_MS = WINDOW_DAYS * 24 * 3600 * 1000;
+      const now = Date.now();
+
+      // 学習履歴（直近30日を noteAttempt が保存）
+      const perfRaw = JSON.parse(localStorage.getItem(`quiz:${state.user}:perf`) || '{}');
+
+      // 2バケット：
+      // A: 直近20日に 未回答（= 該当期間の試行ゼロ） or 1回でも誤答あり
+      // B: 直近20日に 試行はあり かつ すべて正解
+      const bucketA = [];
+      const bucketB = [];
+
+      for (let i = 0; i < deckArr.length; i++) {
+        const q = deckArr[i];
+        const key = q.id ? `id:${q.id}` : `${q.type}:${q.en}__${q.jp}`;
+        const rec = perfRaw[key];
+
+        const attempts = (rec && Array.isArray(rec.attempts)) ? rec.attempts : [];
+        const recent = attempts.filter(a => (now - new Date(a.at).getTime()) <= WINDOW_MS);
+
+        if (recent.length === 0) {
+          // 直近20日に未回答 → A
+          bucketA.push(i);
+        } else {
+          const hadWrong = recent.some(a => !a.correct);
+          if (hadWrong) bucketA.push(i);
+          else bucketB.push(i); // 全て正解 → B
+        }
+      }
+
+      // 目標比率：A 60% / B 40%（不足は相互補完）
+      const targetA = Math.round(n * 0.6);
+      const targetB = n - targetA;
+
+      const order = [];
+      const A = shuffle(bucketA).slice(); // 既存の shuffle() を利用
+      const B = shuffle(bucketB).slice();
+
+      // まずAから
+      while (order.length < targetA && A.length) order.push(A.shift());
+      // 次にBから
+      while (order.length < targetA + targetB && B.length) order.push(B.shift());
+      // どちらか不足なら残りで補完
+      const rest = [...A, ...B];
+      while (order.length < n && rest.length) order.push(rest.shift());
+
+      return order;
+    }
+
+
+
+
+
+
+    function buildOrderFromWrong(strategy='all'){
+      const wrong=getWrongQueue();
+      if(wrong.length===0) return [];
+      const need = Math.min(state.totalPerSet, wrong.length);
+      let pool = [];
+      if(strategy==='recent'){
+        const cutoff = Date.now() - 7*24*3600*1000;
+        const recent = wrong.filter(x=> x.at && (new Date(x.at).getTime()>=cutoff))
+                            .sort((a,b)=> new Date(b.at)-new Date(a.at));
+        pool = recent.slice(0, need);
+        if(pool.length < need){
+          const rest = wrong.filter(x=> !pool.includes(x));
+          pool = pool.concat(rest.slice(0, need - pool.length));
+        }
+      }else{
+        pool = wrong.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]).slice(0, need);
+      }
+      window.__REVIEW_DECK__ = pool.map(w=>({ ...w }));
+      return [...window.__REVIEW_DECK__.keys()];
+    }
+
+    // === 成績インデックス（ローカル）: 過去データから弱点抽出 ===
+    const PERF_KEY = (u)=>`quiz:${u}:perf`;
+    const qKeyOf = (q)=> q.id? `id:${q.id}` : `${q.type}:${q.en}__${q.jp}`;
+    function loadPerf(){ return JSON.parse(localStorage.getItem(PERF_KEY(state.user))||'{}'); }
+    function savePerf(p){ localStorage.setItem(PERF_KEY(state.user), JSON.stringify(p)); }
+    function noteAttempt(q, correct, at){
+      const p = loadPerf();
+      const k = qKeyOf(q);
+      const rec = p[k] || { id:q.id||null, type:q.type, jp:q.jp, en:q.en, unit:q.unit||null, attempts:[] };
+      rec.attempts.push({ correct: !!correct, at });
+      const cutoff = Date.now() - 30*24*3600*1000; // 30日でローテ
+      rec.attempts = rec.attempts.filter(a=> new Date(a.at).getTime() >= cutoff);
+      p[k]=rec; savePerf(p);
+    }
+    function weakCandidates(windowDays){
+      const p = loadPerf();
+      const cut = Date.now() - (windowDays*24*3600*1000);
+      const list = [];
+      const d = deck();
+      for(const q of d){
+        const k = qKeyOf(q);
+        const rec = p[k];
+        if(!rec || !rec.attempts || rec.attempts.length===0) continue;
+        const arr = rec.attempts.filter(a=> new Date(a.at).getTime() >= cut);
+        if(arr.length===0) continue;
+        const wrong = arr.filter(a=>!a.correct).length;
+        const acc = (arr.length - wrong)/arr.length;
+        list.push({ q, acc, attempts: arr.length, wrong, lastAt: arr[arr.length-1].at });
+      }
+      // 低正答率 → 試行回数多 → 最近 の順
+      list.sort((a,b)=> (a.acc - b.acc) || (b.attempts - a.attempts) || (new Date(b.lastAt)-new Date(a.lastAt)) );
+      return list;
+    }
+    function buildOrderWeak(windowDays=7){
+      const stats = weakCandidates(windowDays);
+      if(stats.length===0) return [];
+      const pick = stats.slice(0, Math.min(state.totalPerSet, stats.length)).map(s=>s.q);
+      window.__WEAK_DECK__ = pick;
+      return pick.map((_,i)=>i);
+    }
+
+    async function startSet(){
+      try{ await ensureQuestions(); }catch(e){ alert(e.message||e); return; }
+      const d=deck();
+      if(!d.length){ alert('この出題タイプの問題がありません。/data/questions.json をご確認ください。'); show('setup'); return; }
+      state.qIndex=0; state.correct=0; state.wrong=0; state.answered=[]; state.graded=false;
+      $('#stat-correct').textContent='0'; $('#stat-wrong').textContent='0';
+      if(state.mode==='review'){
+        const ord = buildOrderFromWrong(state.reviewStrategy||'all');
+        if(ord.length===0){ alert('復習する問題がありません。まずは通常モードで間違いをためましょう。'); show('setup'); return; }
+        state.order = ord;
+      }else if(state.mode==='weak'){
+        const ord = buildOrderWeak(state.weakWindowDays||7);
+        if(ord.length===0){ alert('弱点候補が見つかりません（最近のデータが不足）。通常モードで解いてデータを増やしましょう。'); show('setup'); return; }
+        state.order = ord;
+      }else{
+        state.order = buildOrderFromBank();
+      }
+      show('quiz'); startTimer(); renderQuestion();
+    }
+
+    /********** 出題＆UI **********/
+    function getCurrentQuestion(){
+      const idx = state.order[state.qIndex];
+      if(state.mode==='review') return window.__REVIEW_DECK__[idx];
+      if(state.mode==='weak') return window.__WEAK_DECK__[idx];
+      return deck()[idx];
+    }
+
+    function startTimer(){ state.startedAt=Date.now(); if(state.timerId) clearInterval(state.timerId); state.timerId=setInterval(()=>{ const sec=Math.floor((Date.now()-state.startedAt)/1000); $('#timer').textContent=`⏱ ${fmtTime(sec)}`; }, 250); }
+    function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
+
+    function renderQuestion(){
+      const q = getCurrentQuestion();
+      state.graded = false;
+      $('#status').textContent = `Q ${state.qIndex+1}/${state.order.length}${state.mode==='review'?'（復習）':''}`;
+      $('#explain').textContent='';
+
+      if(state.qType==='reorder'){
+        $('#ui-reorder').style.display='block';
+        $('#ui-vocab').style.display='none';
+        $('#prompt').innerHTML = q.jp ? `${q.jp}<br><span class="muted">ヒント: ${q.tip||''}</span>` : '<span class="muted">語順を並べ替えましょう</span>';
+        const target=$('#target'); const bank=$('#bank'); target.innerHTML=''; bank.innerHTML='';
+        const chunks = shuffle(q.chunks);
+        chunks.forEach((c,i)=>{
+          const chip=document.createElement('button'); chip.className='chip'; chip.setAttribute('data-text',c); chip.textContent=`${i+1}. ${c}`;
+          chip.onclick=()=>placeChip(chip); bank.appendChild(chip);
+          chip.draggable=true; chip.ondragstart=e=>{ e.dataTransfer.setData('text/plain', c); chip.classList.add('dragging'); };
+          chip.ondragend=()=>chip.classList.remove('dragging');
+        });
+        $('#target').ondragover=e=>{ e.preventDefault(); };
+        $('#target').ondrop=e=>{ e.preventDefault(); const text=e.dataTransfer.getData('text/plain'); const src=[...$$('#bank .chip')].find(ch=>ch.getAttribute('data-text')===text && !ch.classList.contains('used')); if(src) placeChip(src); };
+        $('#btn-next').disabled = true;
+      } else {
+        $('#ui-reorder').style.display='none';
+        $('#ui-vocab').style.display='block';
+        $('#prompt').innerHTML = `意味: <b>${q.jp}</b>`;
+        $('#vocab-tip').innerHTML = q.tip? `ヒント: ${q.tip}` : '';
+        const inp = $('#vocab-input'); inp.value=''; inp.focus();
+        $('#btn-next').disabled = false; // 入力だけなので次へボタンは常に押せる（採点は1回）
+      }
+    }
+
+    function placeChip(chip){ if(chip.classList.contains('used')) return; chip.classList.add('used'); const btn=document.createElement('button'); btn.className='chip'; btn.textContent=chip.getAttribute('data-text'); btn.onclick=()=>{ btn.remove(); chip.classList.remove('used'); updateNextState(); }; $('#target').appendChild(btn); updateNextState(); }
+    function undo(){ if(state.qType!=='reorder') return; const t=$$('#target .chip'); const last=t[t.length-1]; if(!last) return; const text=last.textContent; last.remove(); const bankChip=[...$$('#bank .chip')].find(c=>c.getAttribute('data-text')===text); if(bankChip) bankChip.classList.remove('used'); updateNextState(); }
+    function clearAnswer(){ if(state.qType==='reorder'){ $$('#target .chip').forEach(n=>n.remove()); $$('#bank .chip').forEach(n=>n.classList.remove('used')); updateNextState(); } else { $('#vocab-input').value=''; $('#vocab-input').focus(); } }
+
+    function currentAnswer(){ if(state.qType==='reorder'){ return [...$('#target').children].map(x=>x.textContent).join(' ');} return $('#vocab-input').value||''; }
+    function updateNextState(){ if(state.qType==='reorder'){ const q=getCurrentQuestion(); const done = $$('#target .chip').length === q.chunks.length; $('#btn-next').disabled = !done; } }
+
+    /********** 採点・進行 **********/
+    function checkAnswer(){
+      if(state.graded) return; // 二重加算防止
+      const q = getCurrentQuestion();
+
+      let ans, right, correct;
+      if(state.qType==='reorder'){
+        if($$('#target .chip').length !== q.chunks.length){ $('#explain').innerHTML='<span class="ng">まだ並べ終えていません。</span>'; return; }
+        ans = normalizeEndPunc(normalizeSpaces(currentAnswer()));
+        right = normalizeEndPunc(normalizeSpaces(q.en));
+        correct = (ans===right);
+      } else { // vocab
+        ans = normalizeWord(currentAnswer());
+        right = normalizeWord(q.en);
+        correct = (ans===right);
+      }
+
+      const record = {
+        type: state.qType,
+        id: q.id||null,
+        unit: q.unit||null,
+        userAnswer: ans,
+        correct,
+        setIndex: state.setIndex, qIndex: state.qIndex, mode: (state.mode||'normal'),
+        at: nowISO()
+      };
+
+      if(correct){
+        state.correct++; $('#stat-correct').textContent = state.correct;
+        $('#explain').innerHTML = `✅ 正解！ <span class="muted">${q.en}</span>`;
+        removeFromWrongIfMatched({id:q.id, jp:q.jp, en:q.en});
+      } else {
+        state.wrong++; $('#stat-wrong').textContent = state.wrong;
+        $('#explain').innerHTML = state.qType==='reorder'
+          ? `❌ 不正解。 正解: <b>${q.en}</b><br><span class=muted>${q.tip||''}</span>`
+          : `❌ 不正解。 正解: <b>${q.en}</b>${q.tip? `<br><span class=muted>${q.tip}</span>`:''}`;
+        // 復習用には詳細保持
+        addWrongLocal({ type:state.qType, id:q.id||null, unit:q.unit||null, jp:q.jp, en:q.en, chunks:q.chunks, tip:q.tip||'', userAnswer: ans, at: record.at });
+      }
+
+      state.answered.push(record);
+      noteAttempt(q, correct, record.at);
+      state.graded = true;
+    }
+
+    function nextQuestion(){
+      if(!state.graded) checkAnswer();
+      state.qIndex++;
+      if(state.qIndex >= state.order.length){ finishSet(); }
+      else { renderQuestion(); }
+    }
+
+    function finishSet(){
+      stopTimer();
+      const total = state.order.length;
+      const accuracy = total? Math.round((state.correct/total)*100):0;
+      const seconds = Math.floor((Date.now()-state.startedAt)/1000);
+      $('#summary').innerHTML = `正解 <b>${state.correct}</b> / ${total}（<b>${accuracy}%</b>）・所要時間 ${Math.floor(seconds/60)}分${seconds%60}秒`;
+      show('finished');
+
+      // --- このセットの誤答だけを抽出してボタンに渡す ---
+      const srcDeck = (state.mode==='review') ? window.__REVIEW_DECK__
+                    : (state.mode==='weak')  ? window.__WEAK_DECK__
+                    : deck();
+
+      // answered の qIndex は「state.order 上の位置」なので、srcDeck と order から元問題を復元
+      const missedObjs = state.answered
+        .filter(r=>!r.correct)
+        .map(r=>{
+          const idxInSrc = state.order[r.qIndex];
+          return srcDeck[idxInSrc];
+        })
+        .filter(Boolean);
+
+      // 状態に保持して、ボタン表示を更新
+      state.missedSetDeck = missedObjs;
+      const btnReviewThis = document.getElementById('btn-review-thisset');
+      if(btnReviewThis){
+        const n = missedObjs.length;
+        btnReviewThis.disabled = (n===0);
+        btnReviewThis.textContent = n
+          ? `❗このセットのまちがいで復習（${n}問）`
+          : `❗このセットのまちがいで復習（0問）`;
+      }
+
+      const wireAnswered = state.answered.map(({type,id,unit,userAnswer,correct,setIndex,qIndex,mode,at})=>({type,id,unit,userAnswer,correct,setIndex,qIndex,mode,at}));
+      const wireCorrect  = wireAnswered.filter(x=>x.correct);
+      const wireMissed   = wireAnswered.filter(x=>!x.correct);
+
+      const sessionWire = {
+        user: state.user,
+        setIndex: state.setIndex,
+        mode: state.mode||'normal',
+        qType: state.qType,
+        total,
+        correct: state.correct,
+        wrong: total - state.correct,
+        accuracy,
+        seconds,
+        endedAt: nowISO(),
+        answered: wireAnswered,
+        correctItems: wireCorrect,
+        missed: wireMissed
+      };
+
+      // ローカル履歴はサマリのみ（軽量）
+      pushHistory({ user: state.user, setIndex: state.setIndex, mode: state.mode||'normal', qType: state.qType, total, correct: state.correct, wrong: total-state.correct, accuracy, seconds, endedAt: sessionWire.endedAt });
+
+      const saveEl = document.getElementById('save-status');
+      const url = (document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT);
+      state.endpoint = url;
+      if(url){
+        saveEl.textContent = '結果送信: 送信中…';
+        postJSON(url, sessionWire).then(r=>{
+          if(r.ok){ saveEl.innerHTML = '<span class="ok">結果送信: 成功</span>'; }
+          else { saveEl.innerHTML = `<span class=\"ng\">結果送信: 失敗</span> ${r.status||r.error||''}`; }
+        });
+      } else {
+        saveEl.textContent = '結果送信: URL未設定（ローカル保存のみ）';
+      }
+    }
+
+    /********** イベント **********/
+    document.getElementById('btn-start').onclick=async ()=>{
+      try{
+        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
+        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
+        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
+        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
+        state.setIndex=0; state.mode='normal'; state.qType=document.getElementById('qtype').value||'reorder';
+        rememberUserAndEndpoint();
+        await startSet();
+      }catch(e){ alert('開始できません: '+(e.message||e)); }
+    };
+    document.getElementById('btn-review').onclick=async ()=>{
+      try{
+        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
+        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
+        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
+        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
+        state.setIndex=0; state.mode='review'; state.reviewStrategy='all'; state.qType=document.getElementById('qtype').value||'reorder';
+        rememberUserAndEndpoint();
+        await startSet();
+      }catch(e){ alert('復習を開始できません: '+(e.message||e)); }
+    };
+    // 最近のまちがい優先
+    document.getElementById('btn-review-recent').onclick=async ()=>{
+      try{
+        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
+        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
+        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
+        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
+        state.setIndex=0; state.mode='review'; state.reviewStrategy='recent'; state.qType=document.getElementById('qtype').value||'reorder';
+        rememberUserAndEndpoint();
+        await startSet();
+      }catch(e){ alert('最近の復習を開始できません: '+(e.message||e)); }
+    };
+
+    document.getElementById('btn-review-thisset').onclick = async ()=>{
+      const deck = (state.missedSetDeck||[]).map(q=>({ ...q }));
+      await startSetCustom(deck);
+    };
+
+    // 弱点対策（過去7日）
+    document.getElementById('btn-weak').onclick=async ()=>{
+      try{
+        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
+        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
+        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
+        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
+        state.setIndex=0; state.mode='weak'; state.qType=document.getElementById('qtype').value||'reorder';
+        rememberUserAndEndpoint();
+        await startSet();
+      }catch(e){ alert('弱点対策を開始できません: '+(e.message||e)); }
+    };
+   
+    // 入力欄変更で即保存＋サジェスト更新
+    document.getElementById('learner').addEventListener('change', (e)=>{
+      const v=(e.target.value||'').trim(); if(!v) return;
+      state.user=v; document.getElementById('user-pill').textContent=`👤 ${v}`;
+      rememberUserAndEndpoint();
+    });
+    document.getElementById('endpoint').addEventListener('change', (e)=>{
+      const v=(e.target.value||'').trim(); if(!v) return;
+      state.endpoint=v; localStorage.setItem(REMEMBER_ENDPOINT_KEY, v);
+    });
+
+    document.getElementById('btn-check').onclick=checkAnswer; document.getElementById('btn-next').onclick=nextQuestion; document.getElementById('btn-undo').onclick=undo; document.getElementById('btn-clear').onclick=clearAnswer; document.getElementById('btn-clear-vocab').onclick=()=>{ $('#vocab-input').value=''; $('#vocab-input').focus(); };
+    document.getElementById('btn-speak').onclick=()=>{ const q=getCurrentQuestion(); if(!q) return; const u=new SpeechSynthesisUtterance(q.en); u.lang='en-US'; u.rate=1.0; speechSynthesis.cancel(); speechSynthesis.speak(u); };
+
+    // 完了画面の遷移
+    document.getElementById('btn-nextset').onclick=async ()=>{ try{ state.setIndex++; await startSet(); }catch(e){ alert('次セットを開始できません: '+(e.message||e)); } };
+    document.getElementById('btn-dashboard').onclick=()=>{ 
+      try{ 
+        const u = encodeURIComponent(state.user||'');
+        window.location.href = `/admin?user=${u}`;
+      }catch(e){ 
+        alert('ダッシュボードへ移動できません: '+(e.message||e)); 
+      } 
+    };
+    document.getElementById('btn-to-setup').onclick=()=>{ show('setup'); };
+
+    // キーボード（Enterで採点/次へ＋iOSでキーボードを閉じる）
+    window.addEventListener('keydown',(e)=>{
+      if(document.getElementById('quiz').style.display==='none') return;
+      if(state.qType==='reorder'){
+        if(e.key>='1' && e.key<='9'){ const idx=parseInt(e.key,10)-1; const chips=$$('#bank .chip'); const chip=chips[idx]; if(chip) placeChip(chip); }
+        else if(e.key==='Backspace'){ e.preventDefault(); undo(); }
+      }
+      if(e.key==='Enter'){
+        e.preventDefault();
+        const done = (state.qType==='reorder')? ($$('#target .chip').length === getCurrentQuestion().chunks.length) : true;
+        if(!state.graded && done){ checkAnswer(); }
+        else if(state.graded){ nextQuestion(); }
+        if(document.activeElement && document.activeElement.blur){ document.activeElement.blur(); }
+      }
+    });
+
+    // 初期
+    loadRememberedSettings();
+    show('setup');
+  </script>
+</body>
+</html>
