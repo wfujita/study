@@ -83,6 +83,7 @@
         <button class="primary" id="btn-start">▶ 学習スタート</button>
         <button id="btn-review" title="間違えた問題だけで出題">🔁 復習（まちがい）</button>
         <button id="btn-review-recent" title="最近のまちがいを優先">🕘 復習（最近）</button>
+        <button id="btn-mix-yesterday" title="3問+前日のまちがい">📅 3問＋昨日まちがい</button>
         <button id="btn-weak" title="過去7日の正答率が低い問題">🎯 弱点対策（過去7日）</button>
       </div>
       <div class="muted" style="margin-top:8px">
@@ -610,6 +611,31 @@
         rememberUserAndEndpoint();
         await startSet();
       }catch(e){ alert('最近の復習を開始できません: '+(e.message||e)); }
+    };
+
+    // 3問＋昨日の間違い
+    document.getElementById('btn-mix-yesterday').onclick=async ()=>{
+      try{
+        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
+        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
+        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
+        state.qType=document.getElementById('qtype').value||'reorder';
+        rememberUserAndEndpoint();
+
+        await ensureQuestions();
+        const today=new Date();
+        const todayStart=new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const yStart=new Date(todayStart); yStart.setDate(yStart.getDate()-1);
+
+        const allWrong=getWrongQueue();
+        const yWrong=allWrong.filter(x=>{ if(!x.at) return false; const d=new Date(x.at); return d>=yStart && d<todayStart; }).map(x=>({ ...x }));
+        const keyOf=q=> q.id?`id:${q.id}`:`${q.en}__${q.jp}`;
+        const used=new Set(yWrong.map(keyOf));
+        const fresh=shuffle(deck().filter(q=>!used.has(keyOf(q)))).slice(0,3);
+        const customDeck=[...fresh, ...yWrong];
+        state.setIndex=0; state.totalPerSet=customDeck.length;
+        await startSetCustom(customDeck);
+      }catch(e){ alert('出題を開始できません: '+(e.message||e)); }
     };
 
     document.getElementById('btn-review-thisset').onclick = async ()=>{
