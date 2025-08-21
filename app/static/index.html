@@ -81,9 +81,6 @@
         </label>
         <label class="row" style="gap:6px"><span class="muted">サーバ保存URL</span><input id="endpoint" type="text" value="http://192.168.50.122/api/results" placeholder="/api/results" style="min-width:260px"/></label>
         <button class="primary" id="btn-start">▶ 学習スタート</button>
-        <button id="btn-review" title="間違えた問題だけで出題">🔁 復習（まちがい）</button>
-        <button id="btn-review-recent" title="最近のまちがいを優先">🕘 復習（最近）</button>
-        <button id="btn-mix-yesterday" title="3問+前日のまちがい">📅 3問＋昨日まちがい</button>
         <button id="btn-weak" title="過去7日の正答率が低い問題">🎯 弱点対策（過去7日）</button>
       </div>
       <div class="muted" style="margin-top:8px">
@@ -174,7 +171,6 @@
       answered:[],   // サーバ送信用（最小）
       graded:false,  // 一問一採点
       mode:'normal',
-      reviewStrategy:'all', // 'all' | 'recent'
       weakWindowDays:7,      // 過去◯日を対象
       missedSetDeck: [],   // このセットで間違えた問題のデッキ
     };
@@ -201,7 +197,7 @@
       }catch(e){ clearTimeout(t); return {ok:false, error:String(e)}; }
     }
 
-    async function startSetCustom(customDeck){
+    async function startSetCustom(customDeck, mode='review'){
       try{ await ensureQuestions(); }catch(e){ alert(e.message||e); return; }
       if(!customDeck || !customDeck.length){ alert('このセットの間違いはありません。'); return; }
 
@@ -212,7 +208,7 @@
       // レビュー用デッキに流し込む（既存ロジック流用）
       window.__REVIEW_DECK__ = customDeck.map(q=>({ ...q }));
       state.order = [...window.__REVIEW_DECK__.keys()];
-      state.mode = 'review';
+      state.mode = mode;
       // 表示UIを合わせる（並べ替え/単語）
       state.qType = (window.__REVIEW_DECK__[0]?.type) || state.qType;
 
@@ -324,27 +320,6 @@
 
 
 
-    function buildOrderFromWrong(strategy='all'){
-      const wrong=getWrongQueue();
-      if(wrong.length===0) return [];
-      const need = Math.min(state.totalPerSet, wrong.length);
-      let pool = [];
-      if(strategy==='recent'){
-        const cutoff = Date.now() - 7*24*3600*1000;
-        const recent = wrong.filter(x=> x.at && (new Date(x.at).getTime()>=cutoff))
-                            .sort((a,b)=> new Date(b.at)-new Date(a.at));
-        pool = recent.slice(0, need);
-        if(pool.length < need){
-          const rest = wrong.filter(x=> !pool.includes(x));
-          pool = pool.concat(rest.slice(0, need - pool.length));
-        }
-      }else{
-        pool = wrong.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]).slice(0, need);
-      }
-      window.__REVIEW_DECK__ = pool.map(w=>({ ...w }));
-      return [...window.__REVIEW_DECK__.keys()];
-    }
-
     // === 成績インデックス（ローカル）: 過去データから弱点抽出 ===
     const PERF_KEY = (u)=>`quiz:${u}:perf`;
     const qKeyOf = (q)=> q.id? `id:${q.id}` : `${q.type}:${q.en}__${q.jp}`;
@@ -392,11 +367,7 @@
       if(!d.length){ alert('この出題タイプの問題がありません。/data/questions.json をご確認ください。'); show('setup'); return; }
       state.qIndex=0; state.correct=0; state.wrong=0; state.answered=[]; state.graded=false;
       $('#stat-correct').textContent='0'; $('#stat-wrong').textContent='0';
-      if(state.mode==='review'){
-        const ord = buildOrderFromWrong(state.reviewStrategy||'all');
-        if(ord.length===0){ alert('復習する問題がありません。まずは通常モードで間違いをためましょう。'); show('setup'); return; }
-        state.order = ord;
-      }else if(state.mode==='weak'){
+      if(state.mode==='weak'){
         const ord = buildOrderWeak(state.weakWindowDays||7);
         if(ord.length===0){ alert('弱点候補が見つかりません（最近のデータが不足）。通常モードで解いてデータを増やしましょう。'); show('setup'); return; }
         state.order = ord;
@@ -409,7 +380,7 @@
     /********** 出題＆UI **********/
     function getCurrentQuestion(){
       const idx = state.order[state.qIndex];
-      if(state.mode==='review') return window.__REVIEW_DECK__[idx];
+      if(state.mode==='review' || state.mode==='custom') return window.__REVIEW_DECK__[idx];
       if(state.mode==='weak') return window.__WEAK_DECK__[idx];
       return deck()[idx];
     }
@@ -516,7 +487,7 @@
       show('finished');
 
       // --- このセットの誤答だけを抽出してボタンに渡す ---
-      const srcDeck = (state.mode==='review') ? window.__REVIEW_DECK__
+      const srcDeck = (state.mode==='review' || state.mode==='custom') ? window.__REVIEW_DECK__
                     : (state.mode==='weak')  ? window.__WEAK_DECK__
                     : deck();
 
@@ -582,42 +553,6 @@
       try{
         state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
         document.getElementById('user-pill').textContent=`👤 ${state.user}`;
-        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
-        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
-        state.setIndex=0; state.mode='normal'; state.qType=document.getElementById('qtype').value||'reorder';
-        rememberUserAndEndpoint();
-        await startSet();
-      }catch(e){ alert('開始できません: '+(e.message||e)); }
-    };
-    document.getElementById('btn-review').onclick=async ()=>{
-      try{
-        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
-        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
-        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
-        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
-        state.setIndex=0; state.mode='review'; state.reviewStrategy='all'; state.qType=document.getElementById('qtype').value||'reorder';
-        rememberUserAndEndpoint();
-        await startSet();
-      }catch(e){ alert('復習を開始できません: '+(e.message||e)); }
-    };
-    // 最近のまちがい優先
-    document.getElementById('btn-review-recent').onclick=async ()=>{
-      try{
-        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
-        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
-        state.totalPerSet=Math.max(3,Math.min(20,parseInt(document.getElementById('count').value||5,10)));
-        state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
-        state.setIndex=0; state.mode='review'; state.reviewStrategy='recent'; state.qType=document.getElementById('qtype').value||'reorder';
-        rememberUserAndEndpoint();
-        await startSet();
-      }catch(e){ alert('最近の復習を開始できません: '+(e.message||e)); }
-    };
-
-    // 3問＋昨日の間違い
-    document.getElementById('btn-mix-yesterday').onclick=async ()=>{
-      try{
-        state.user=(document.getElementById('learner').value||'guest').trim()||'guest';
-        document.getElementById('user-pill').textContent=`👤 ${state.user}`;
         state.endpoint=document.getElementById('endpoint').value.trim() || DEFAULT_ENDPOINT; document.getElementById('endpoint').value = state.endpoint;
         state.qType=document.getElementById('qtype').value||'reorder';
         rememberUserAndEndpoint();
@@ -634,8 +569,8 @@
         const fresh=shuffle(deck().filter(q=>!used.has(keyOf(q)))).slice(0,3);
         const customDeck=[...fresh, ...yWrong];
         state.setIndex=0; state.totalPerSet=customDeck.length;
-        await startSetCustom(customDeck);
-      }catch(e){ alert('出題を開始できません: '+(e.message||e)); }
+        await startSetCustom(customDeck, 'custom');
+      }catch(e){ alert('開始できません: '+(e.message||e)); }
     };
 
     document.getElementById('btn-review-thisset').onclick = async ()=>{
