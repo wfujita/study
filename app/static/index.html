@@ -265,17 +265,17 @@
       const deckArr = deck();
       const n = Math.min(state.totalPerSet, deckArr.length);
 
-      // 20日ウィンドウ
-      const WINDOW_DAYS = 20;
-      const WINDOW_MS = WINDOW_DAYS * 24 * 3600 * 1000;
+      const STREAK_THRESHOLD = 3;       // 連続正解回数のしきい値
+      const NO_WRONG_DAYS = 7;          // 最後の誤答からの日数しきい値
+      const NO_WRONG_MS = NO_WRONG_DAYS * 24 * 3600 * 1000;
       const now = Date.now();
 
       // 学習履歴（直近30日を noteAttempt が保存）
       const perfRaw = JSON.parse(localStorage.getItem(`quiz:${state.user}:perf`) || '{}');
 
       // 2バケット：
-      // A: 直近20日に 未回答（= 該当期間の試行ゼロ） or 1回でも誤答あり
-      // B: 直近20日に 試行はあり かつ すべて正解
+      // A: 未回答 or 最近間違いあり
+      // B: 最近間違えていない問題（連続正解が閾値以上 または 最後の誤答から一定期間経過）
       const bucketA = [];
       const bucketB = [];
 
@@ -285,16 +285,27 @@
         const rec = perfRaw[key];
 
         const attempts = (rec && Array.isArray(rec.attempts)) ? rec.attempts : [];
-        const recent = attempts.filter(a => (now - new Date(a.at).getTime()) <= WINDOW_MS);
+        if (attempts.length === 0) { bucketA.push(i); continue; }
 
-        if (recent.length === 0) {
-          // 直近20日に未回答 → A
-          bucketA.push(i);
-        } else {
-          const hadWrong = recent.some(a => !a.correct);
-          if (hadWrong) bucketA.push(i);
-          else bucketB.push(i); // 全て正解 → B
+        let consecutive = 0;
+        let lastWrong = null;
+        for (let k = attempts.length - 1; k >= 0; k--) {
+          const a = attempts[k];
+          if (a.correct) {
+            consecutive++;
+          } else {
+            lastWrong = new Date(a.at).getTime();
+            break;
+          }
         }
+
+        const isRecentCorrect =
+          (consecutive >= STREAK_THRESHOLD) ||
+          (!lastWrong) ||
+          ((now - lastWrong) > NO_WRONG_MS);
+
+        if (isRecentCorrect) bucketB.push(i);
+        else bucketA.push(i);
       }
 
       // 目標比率：A 60% / B 40%（不足は相互補完）
