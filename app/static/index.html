@@ -266,17 +266,14 @@
       const deckArr = deck();
       const n = Math.min(state.totalPerSet, deckArr.length);
 
-      const STREAK_THRESHOLD = 3;       // 連続正解回数のしきい値
-      const NO_WRONG_DAYS = 7;          // 最後の誤答からの日数しきい値
-      const NO_WRONG_MS = NO_WRONG_DAYS * 24 * 3600 * 1000;
-      const now = Date.now();
+      const STREAK_THRESHOLD = 2;       // 連続正解回数のしきい値
 
       // 学習履歴（直近30日を noteAttempt が保存）
       const perfRaw = JSON.parse(localStorage.getItem(`quiz:${state.user}:perf`) || '{}');
 
       // 2バケット：
-      // A: 未回答 or 最近間違いあり
-      // B: 最近間違えていない問題（連続正解が閾値以上 または 最後の誤答から一定期間経過）
+      // A: 未回答 or 連続正解数がしきい値未満
+      // B: 連続正解数がしきい値以上
       const bucketA = [];
       const bucketB = [];
 
@@ -289,25 +286,14 @@
         if (attempts.length === 0) { bucketA.push(i); continue; }
 
         let consecutive = 0;
-        let lastWrong = null;
         for (let k = attempts.length - 1; k >= 0; k--) {
           const a = attempts[k];
-          if (a.correct) {
-            consecutive++;
-          } else {
-            lastWrong = new Date(a.at).getTime();
-            break;
-          }
+          if (a.correct) { consecutive++; }
+          else { break; }
         }
 
-        const isRecentCorrect =
-          (consecutive >= STREAK_THRESHOLD) ||
-          (!lastWrong) ||
-          ((now - lastWrong) > NO_WRONG_MS);
-
-        if (isRecentCorrect) {
-          const correctCnt = attempts.filter(a=>a.correct).length;
-          bucketB.push({ idx:i, correctCnt });
+        if (consecutive >= STREAK_THRESHOLD) {
+          bucketB.push({ idx:i, streak:consecutive });
         } else {
           bucketA.push(i);
         }
@@ -321,7 +307,7 @@
       const A = shuffle(bucketA); // 既存の shuffle() を利用
       const B = bucketB
         .map(o=>({ ...o, rand: Math.random() }))
-        .sort((a,b)=> (a.correctCnt - b.correctCnt) || (a.rand - b.rand))
+        .sort((a,b)=> (a.streak - b.streak) || (a.rand - b.rand))
         .map(o=>o.idx);
 
       // まずAから
