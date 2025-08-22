@@ -95,6 +95,7 @@
         <span class="pill" id="status">Q 1/5</span>
         <span class="pill">正解: <b id="stat-correct">0</b></span>
         <span class="pill">誤答: <b id="stat-wrong">0</b></span>
+        <span class="pill" id="stat-recent">直近3回: --</span>
         <span class="pill right" id="timer">⏱ 00:00</span>
       </div>
       <div id="prompt" class="muted">（日本語プロンプト）</div>
@@ -265,17 +266,14 @@
       const deckArr = deck();
       const n = Math.min(state.totalPerSet, deckArr.length);
 
-      // 20日ウィンドウ
-      const WINDOW_DAYS = 20;
-      const WINDOW_MS = WINDOW_DAYS * 24 * 3600 * 1000;
-      const now = Date.now();
+      const STREAK_THRESHOLD = 2;       // 連続正解回数のしきい値
 
       // 学習履歴（直近30日を noteAttempt が保存）
       const perfRaw = JSON.parse(localStorage.getItem(`quiz:${state.user}:perf`) || '{}');
 
       // 2バケット：
-      // A: 直近20日に 未回答（= 該当期間の試行ゼロ） or 1回でも誤答あり
-      // B: 直近20日に 試行はあり かつ すべて正解
+      // A: 未回答 or 連続正解数がしきい値未満
+      // B: 連続正解数がしきい値以上
       const bucketA = [];
       const bucketB = [];
 
@@ -285,15 +283,19 @@
         const rec = perfRaw[key];
 
         const attempts = (rec && Array.isArray(rec.attempts)) ? rec.attempts : [];
-        const recent = attempts.filter(a => (now - new Date(a.at).getTime()) <= WINDOW_MS);
+        if (attempts.length === 0) { bucketA.push(i); continue; }
 
-        if (recent.length === 0) {
-          // 直近20日に未回答 → A
-          bucketA.push(i);
+        let consecutive = 0;
+        for (let k = attempts.length - 1; k >= 0; k--) {
+          const a = attempts[k];
+          if (a.correct) { consecutive++; }
+          else { break; }
+        }
+
+        if (consecutive >= STREAK_THRESHOLD) {
+          bucketB.push({ idx:i, streak:consecutive });
         } else {
-          const hadWrong = recent.some(a => !a.correct);
-          if (hadWrong) bucketA.push(i);
-          else bucketB.push(i); // 全て正解 → B
+          bucketA.push(i);
         }
       }
 
@@ -302,8 +304,11 @@
       const targetB = n - targetA;
 
       const order = [];
-      const A = shuffle(bucketA).slice(); // 既存の shuffle() を利用
-      const B = shuffle(bucketB).slice();
+      const A = shuffle(bucketA); // 既存の shuffle() を利用
+      const B = bucketB
+        .map(o=>({ ...o, rand: Math.random() }))
+        .sort((a,b)=> (a.streak - b.streak) || (a.rand - b.rand))
+        .map(o=>o.idx);
 
       // まずAから
       while (order.length < targetA && A.length) order.push(A.shift());
@@ -355,6 +360,19 @@
       const cutoff = Date.now() - 30*24*3600*1000; // 30日でローテ
       rec.attempts = rec.attempts.filter(a=> new Date(a.at).getTime() >= cutoff);
       p[k]=rec; savePerf(p);
+    }
+    function updateRecentStat(q){
+      const p = loadPerf();
+      const k = qKeyOf(q);
+      const rec = p[k];
+      let txt = '直近3回: --';
+      if(rec && Array.isArray(rec.attempts) && rec.attempts.length){
+        const recent = rec.attempts.slice(-3);
+        const ok = recent.filter(a=>a.correct).length;
+        const acc = Math.round((ok/recent.length)*100);
+        txt = `直近3回: ${acc}% (${ok}/${recent.length})`;
+      }
+      $('#stat-recent').textContent = txt;
     }
     function weakCandidates(windowDays){
       const p = loadPerf();
@@ -416,6 +434,7 @@
 
     function renderQuestion(){
       const q = getCurrentQuestion();
+      updateRecentStat(q);
       state.graded = false;
       $('#status').textContent = `Q ${state.qIndex+1}/${state.order.length}${state.mode==='review'?'（復習）':''}`;
       $('#explain').textContent='';
@@ -494,6 +513,7 @@
 
       state.answered.push(record);
       noteAttempt(q, correct, record.at);
+      updateRecentStat(q);
       state.graded = true;
     }
 
