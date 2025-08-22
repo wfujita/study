@@ -305,8 +305,12 @@
           (!lastWrong) ||
           ((now - lastWrong) > NO_WRONG_MS);
 
-        if (isRecentCorrect) bucketB.push(i);
-        else bucketA.push(i);
+        if (isRecentCorrect) {
+          const correctCnt = attempts.filter(a=>a.correct).length;
+          bucketB.push({ idx:i, correctCnt });
+        } else {
+          bucketA.push(i);
+        }
       }
 
       // 目標比率：A 60% / B 40%（不足は相互補完）
@@ -314,8 +318,11 @@
       const targetB = n - targetA;
 
       const order = [];
-      const A = shuffle(bucketA).slice(); // 既存の shuffle() を利用
-      const B = shuffle(bucketB).slice();
+      const A = shuffle(bucketA); // 既存の shuffle() を利用
+      const B = bucketB
+        .map(o=>({ ...o, rand: Math.random() }))
+        .sort((a,b)=> (a.correctCnt - b.correctCnt) || (a.rand - b.rand))
+        .map(o=>o.idx);
 
       // まずAから
       while (order.length < targetA && A.length) order.push(A.shift());
