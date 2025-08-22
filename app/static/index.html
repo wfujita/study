@@ -95,6 +95,7 @@
         <span class="pill" id="status">Q 1/5</span>
         <span class="pill">正解: <b id="stat-correct">0</b></span>
         <span class="pill">誤答: <b id="stat-wrong">0</b></span>
+        <span class="pill" id="stat-recent">直近3回: --</span>
         <span class="pill right" id="timer">⏱ 00:00</span>
       </div>
       <div id="prompt" class="muted">（日本語プロンプト）</div>
@@ -367,6 +368,19 @@
       rec.attempts = rec.attempts.filter(a=> new Date(a.at).getTime() >= cutoff);
       p[k]=rec; savePerf(p);
     }
+    function updateRecentStat(q){
+      const p = loadPerf();
+      const k = qKeyOf(q);
+      const rec = p[k];
+      let txt = '直近3回: --';
+      if(rec && Array.isArray(rec.attempts) && rec.attempts.length){
+        const recent = rec.attempts.slice(-3);
+        const ok = recent.filter(a=>a.correct).length;
+        const acc = Math.round((ok/recent.length)*100);
+        txt = `直近3回: ${acc}% (${ok}/${recent.length})`;
+      }
+      $('#stat-recent').textContent = txt;
+    }
     function weakCandidates(windowDays){
       const p = loadPerf();
       const cut = Date.now() - (windowDays*24*3600*1000);
@@ -427,6 +441,7 @@
 
     function renderQuestion(){
       const q = getCurrentQuestion();
+      updateRecentStat(q);
       state.graded = false;
       $('#status').textContent = `Q ${state.qIndex+1}/${state.order.length}${state.mode==='review'?'（復習）':''}`;
       $('#explain').textContent='';
@@ -505,6 +520,7 @@
 
       state.answered.push(record);
       noteAttempt(q, correct, record.at);
+      updateRecentStat(q);
       state.graded = true;
     }
 
