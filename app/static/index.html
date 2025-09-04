@@ -468,7 +468,15 @@
     function undo(){ if(state.qType!=='reorder') return; const t=$$('#target .chip'); const last=t[t.length-1]; if(!last) return; const text=last.textContent; last.remove(); const bankChip=[...$$('#bank .chip')].find(c=>c.getAttribute('data-text')===text); if(bankChip) bankChip.classList.remove('used'); updateNextState(); }
     function clearAnswer(){ if(state.qType==='reorder'){ $$('#target .chip').forEach(n=>n.remove()); $$('#bank .chip').forEach(n=>n.classList.remove('used')); updateNextState(); } else { $('#vocab-input').value=''; $('#vocab-input').focus(); } }
 
-    function currentAnswer(){ if(state.qType==='reorder'){ return [...$('#target').children].map(x=>x.textContent).join(' ');} return $('#vocab-input').value||''; }
+    function currentAnswer(){
+      if(state.qType==='reorder'){
+        return [...$('#target').children]
+          .map(x=>x.textContent)
+          .join(' ')
+          .replace(/\s+([.,!?])/g,'$1');
+      }
+      return $('#vocab-input').value||'';
+    }
     function updateNextState(){ if(state.qType==='reorder'){ const q=getCurrentQuestion(); const done = $$('#target .chip').length === q.chunks.length; $('#btn-next').disabled = !done; } }
 
     /********** 採点・進行 **********/
